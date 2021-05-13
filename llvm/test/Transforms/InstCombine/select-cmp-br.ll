@@ -11,25 +11,22 @@ declare void @foobar()
 define void @test1(%C* %arg) {
 ; CHECK-LABEL: @test1(
 ; CHECK-NEXT:  entry:
-; CHECK-NEXT:    [[TMP:%.*]] = getelementptr inbounds [[C:%.*]], %C* [[ARG:%.*]], i64 0, i32 0, i32 0
 ; CHECK-NEXT:    [[M:%.*]] = load i64*, i64** [[TMP]], align 8
 ; CHECK-NEXT:    [[TMP1:%.*]] = getelementptr inbounds [[C]], %C* [[ARG]], i64 1, i32 0, i32 0
 ; CHECK-NEXT:    [[N:%.*]] = load i64*, i64** [[TMP1]], align 8
-; CHECK-NEXT:    [[TMP5:%.*]] = icmp ne i64* [[M]], [[N]]
-; CHECK-NEXT:    [[TMP71:%.*]] = icmp eq %C* [[ARG]], null
-; CHECK-NEXT:    [[TMP7:%.*]] = select i1 [[TMP5]], i1 true, i1 [[TMP71]]
-; CHECK-NEXT:    br i1 [[TMP7]], label [[BB10:%.*]], label [[BB8:%.*]]
+; CHECK-NEXT:    [[TMP5_NOT:%.*]] = icmp eq i64* [[M]], [[N]]
+; CHECK-NEXT:    br i1 [[TMP5_NOT]], label [[BB8:%.*]], label [[BB10:%.*]]
 ; CHECK:       bb:
 ; CHECK-NEXT:    ret void
 ; CHECK:       bb8:
 ; CHECK-NEXT:    [[TMP9:%.*]] = getelementptr inbounds [[C]], %C* [[ARG]], i64 0, i32 0
-; CHECK-NEXT:    tail call void @bar(%struct.S* [[TMP9]])
+; CHECK-NEXT:    tail call void @bar(%struct.S* nonnull [[TMP9]])
 ; CHECK-NEXT:    br label [[BB:%.*]]
 ; CHECK:       bb10:
 ; CHECK-NEXT:    [[TMP2:%.*]] = getelementptr inbounds i64, i64* [[M]], i64 9
 ; CHECK-NEXT:    [[TMP3:%.*]] = bitcast i64* [[TMP2]] to i64 (%C*)**
 ; CHECK-NEXT:    [[TMP4:%.*]] = load i64 (%C*)*, i64 (%C*)** [[TMP3]], align 8
-; CHECK-NEXT:    [[TMP11:%.*]] = tail call i64 [[TMP4]](%C* [[ARG]])
+; CHECK-NEXT:    [[TMP11:%.*]] = tail call i64 [[TMP4]](%C* nonnull [[ARG]])
 ; CHECK-NEXT:    br label [[BB]]
 ;
 entry:
@@ -61,25 +58,22 @@ bb10:                                             ; preds = %entry
 define void @test2(%C* %arg) {
 ; CHECK-LABEL: @test2(
 ; CHECK-NEXT:  entry:
-; CHECK-NEXT:    [[TMP:%.*]] = getelementptr inbounds [[C:%.*]], %C* [[ARG:%.*]], i64 0, i32 0, i32 0
 ; CHECK-NEXT:    [[M:%.*]] = load i64*, i64** [[TMP]], align 8
 ; CHECK-NEXT:    [[TMP1:%.*]] = getelementptr inbounds [[C]], %C* [[ARG]], i64 1, i32 0, i32 0
 ; CHECK-NEXT:    [[N:%.*]] = load i64*, i64** [[TMP1]], align 8
 ; CHECK-NEXT:    [[TMP5:%.*]] = icmp eq i64* [[M]], [[N]]
-; CHECK-NEXT:    [[TMP71:%.*]] = icmp eq %C* [[ARG]], null
-; CHECK-NEXT:    [[TMP7:%.*]] = select i1 [[TMP5]], i1 true, i1 [[TMP71]]
-; CHECK-NEXT:    br i1 [[TMP7]], label [[BB10:%.*]], label [[BB8:%.*]]
+; CHECK-NEXT:    br i1 [[TMP5]], label [[BB10:%.*]], label [[BB8:%.*]]
 ; CHECK:       bb:
 ; CHECK-NEXT:    ret void
 ; CHECK:       bb8:
 ; CHECK-NEXT:    [[TMP9:%.*]] = getelementptr inbounds [[C]], %C* [[ARG]], i64 0, i32 0
-; CHECK-NEXT:    tail call void @bar(%struct.S* [[TMP9]])
+; CHECK-NEXT:    tail call void @bar(%struct.S* nonnull [[TMP9]])
 ; CHECK-NEXT:    br label [[BB:%.*]]
 ; CHECK:       bb10:
 ; CHECK-NEXT:    [[TMP2:%.*]] = getelementptr inbounds i64, i64* [[M]], i64 9
 ; CHECK-NEXT:    [[TMP3:%.*]] = bitcast i64* [[TMP2]] to i64 (%C*)**
 ; CHECK-NEXT:    [[TMP4:%.*]] = load i64 (%C*)*, i64 (%C*)** [[TMP3]], align 8
-; CHECK-NEXT:    [[TMP11:%.*]] = tail call i64 [[TMP4]](%C* [[ARG]])
+; CHECK-NEXT:    [[TMP11:%.*]] = tail call i64 [[TMP4]](%C* nonnull [[ARG]])
 ; CHECK-NEXT:    br label [[BB]]
 ;
 entry:
@@ -115,21 +109,19 @@ define void @test3(%C* %arg) {
 ; CHECK-NEXT:    [[M:%.*]] = load i64*, i64** [[TMP]], align 8
 ; CHECK-NEXT:    [[TMP1:%.*]] = getelementptr inbounds [[C]], %C* [[ARG]], i64 1, i32 0, i32 0
 ; CHECK-NEXT:    [[N:%.*]] = load i64*, i64** [[TMP1]], align 8
-; CHECK-NEXT:    [[TMP5:%.*]] = icmp ne i64* [[M]], [[N]]
-; CHECK-NEXT:    [[TMP7_NOT1:%.*]] = icmp eq %C* [[ARG]], null
-; CHECK-NEXT:    [[TMP7_NOT:%.*]] = select i1 [[TMP5]], i1 true, i1 [[TMP7_NOT1]]
-; CHECK-NEXT:    br i1 [[TMP7_NOT]], label [[BB10:%.*]], label [[BB8:%.*]]
+; CHECK-NEXT:    [[TMP5:%.*]] = icmp eq i64* [[M]], [[N]]
+; CHECK-NEXT:    br i1 [[TMP5]], label [[BB8:%.*]], label [[BB10:%.*]]
 ; CHECK:       bb:
 ; CHECK-NEXT:    ret void
 ; CHECK:       bb8:
 ; CHECK-NEXT:    [[TMP9:%.*]] = getelementptr inbounds [[C]], %C* [[ARG]], i64 0, i32 0
-; CHECK-NEXT:    tail call void @bar(%struct.S* [[TMP9]])
+; CHECK-NEXT:    tail call void @bar(%struct.S* nonnull [[TMP9]])
 ; CHECK-NEXT:    br label [[BB:%.*]]
 ; CHECK:       bb10:
 ; CHECK-NEXT:    [[TMP2:%.*]] = getelementptr inbounds i64, i64* [[M]], i64 9
 ; CHECK-NEXT:    [[TMP3:%.*]] = bitcast i64* [[TMP2]] to i64 (%C*)**
 ; CHECK-NEXT:    [[TMP4:%.*]] = load i64 (%C*)*, i64 (%C*)** [[TMP3]], align 8
-; CHECK-NEXT:    [[TMP11:%.*]] = tail call i64 [[TMP4]](%C* [[ARG]])
+; CHECK-NEXT:    [[TMP11:%.*]] = tail call i64 [[TMP4]](%C* nonnull [[ARG]])
 ; CHECK-NEXT:    br label [[BB]]
 ;
 entry:
@@ -161,25 +153,21 @@ bb10:                                             ; preds = %entry
 define void @test4(%C* %arg) {
 ; CHECK-LABEL: @test4(
 ; CHECK-NEXT:  entry:
-; CHECK-NEXT:    [[TMP:%.*]] = getelementptr inbounds [[C:%.*]], %C* [[ARG:%.*]], i64 0, i32 0, i32 0
-; CHECK-NEXT:    [[M:%.*]] = load i64*, i64** [[TMP]], align 8
 ; CHECK-NEXT:    [[TMP1:%.*]] = getelementptr inbounds [[C]], %C* [[ARG]], i64 1, i32 0, i32 0
 ; CHECK-NEXT:    [[N:%.*]] = load i64*, i64** [[TMP1]], align 8
 ; CHECK-NEXT:    [[TMP5:%.*]] = icmp eq i64* [[M]], [[N]]
-; CHECK-NEXT:    [[TMP7_NOT1:%.*]] = icmp eq %C* [[ARG]], null
-; CHECK-NEXT:    [[TMP7_NOT:%.*]] = select i1 [[TMP5]], i1 true, i1 [[TMP7_NOT1]]
-; CHECK-NEXT:    br i1 [[TMP7_NOT]], label [[BB10:%.*]], label [[BB8:%.*]]
+; CHECK-NEXT:    br i1 [[TMP5]], label [[BB10:%.*]], label [[BB8:%.*]]
 ; CHECK:       bb:
 ; CHECK-NEXT:    ret void
 ; CHECK:       bb8:
 ; CHECK-NEXT:    [[TMP9:%.*]] = getelementptr inbounds [[C]], %C* [[ARG]], i64 0, i32 0
-; CHECK-NEXT:    tail call void @bar(%struct.S* [[TMP9]])
+; CHECK-NEXT:    tail call void @bar(%struct.S* nonnull [[TMP9]])
 ; CHECK-NEXT:    br label [[BB:%.*]]
 ; CHECK:       bb10:
 ; CHECK-NEXT:    [[TMP2:%.*]] = getelementptr inbounds i64, i64* [[M]], i64 9
 ; CHECK-NEXT:    [[TMP3:%.*]] = bitcast i64* [[TMP2]] to i64 (%C*)**
 ; CHECK-NEXT:    [[TMP4:%.*]] = load i64 (%C*)*, i64 (%C*)** [[TMP3]], align 8
-; CHECK-NEXT:    [[TMP11:%.*]] = tail call i64 [[TMP4]](%C* [[ARG]])
+; CHECK-NEXT:    [[TMP11:%.*]] = tail call i64 [[TMP4]](%C* nonnull [[ARG]])
 ; CHECK-NEXT:    br label [[BB]]
 ;
 entry:
@@ -212,7 +200,7 @@ define void @test5(%C* %arg, i1 %arg1) {
 ; CHECK-LABEL: @test5(
 ; CHECK-NEXT:  entry:
 ; CHECK-NEXT:    [[TMP2_NOT1:%.*]] = icmp eq %C* [[ARG:%.*]], null
-; CHECK-NEXT:    [[TMP2_NOT:%.*]] = select i1 [[ARG1:%.*]], i1 true, i1 [[TMP2_NOT1]]
+; CHECK-NEXT:    [[TMP2_NOT:%.*]] = or i1 [[TMP2_NOT1]], [[ARG1:%.*]]
 ; CHECK-NEXT:    br i1 [[TMP2_NOT]], label [[BB5:%.*]], label [[BB3:%.*]]
 ; CHECK:       bb:
 ; CHECK-NEXT:    ret void

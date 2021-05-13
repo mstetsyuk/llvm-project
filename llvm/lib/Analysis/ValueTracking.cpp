@@ -38,6 +38,7 @@
 #include "llvm/IR/Constant.h"
 #include "llvm/IR/ConstantRange.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/Dominators.h"
@@ -2091,9 +2092,53 @@ static bool isGEPKnownNonNull(const GEPOperator *GEP, unsigned Depth,
   return false;
 }
 
+static bool isGEPFlatKnownNonNull(const GEPOperator *GEP, const DataLayout &DL) {
+  const Function *F = nullptr;
+  if (const Instruction *I = dyn_cast<Instruction>(GEP))
+    F = I->getFunction();
+
+  if (!GEP->isInBounds() ||
+      NullPointerIsDefined(F, GEP->getPointerAddressSpace()))
+    return false;
+
+  // FIXME: Support vector-GEPs.
+  assert(GEP->getType()->isPointerTy() && "We only support plain pointer GEP");
+
+  // Walk the GEP operands and see if any operand introduces a non-zero offset.
+  // If so, then the GEP cannot produce a null pointer, as doing so would
+  // inherently violate the inbounds contract within address space zero.
+  for (gep_type_iterator GTI = gep_type_begin(GEP), GTE = gep_type_end(GEP);
+       GTI != GTE; ++GTI) {
+    // Struct types are easy -- they must always be indexed by a constant.
+    if (StructType *STy = GTI.getStructTypeOrNull()) {
+      ConstantInt *OpC = cast<ConstantInt>(GTI.getOperand());
+      unsigned ElementIdx = OpC->getZExtValue();
+      const StructLayout *SL = DL.getStructLayout(STy);
+      uint64_t ElementOffset = SL->getElementOffset(ElementIdx);
+      if (ElementOffset > 0)
+        return true;
+      continue;
+    }
+
+    // If we have a zero-sized type, the index doesn't matter. Keep looping.
+    if (DL.getTypeAllocSize(GTI.getIndexedType()).getKnownMinSize() == 0)
+      continue;
+
+    // Fast path the constant operand case both for efficiency and so we don't.
+    if (ConstantInt *OpC = dyn_cast<ConstantInt>(GTI.getOperand())) {
+      if (!OpC->isZero())
+        return true;
+      continue;
+    }
+  }
+
+  return false;
+}
+
 static bool isKnownNonNullFromDominatingCondition(const Value *V,
                                                   const Instruction *CtxI,
-                                                  const DominatorTree *DT) {
+                                                  const DominatorTree *DT,
+                                                  const DataLayout &DL) {
   if (isa<Constant>(V))
     return false;
 
@@ -2124,6 +2169,23 @@ static bool isKnownNonNullFromDominatingCondition(const Value *V,
                                 V->getType()->getPointerAddressSpace()) &&
           DT->dominates(I, CtxI))
         return true;
+    }
+
+    if (const GEPOperator *GEP = dyn_cast<GEPOperator>(U)) {
+      const Instruction *I = cast<Instruction>(U);
+      if (DT->dominates(I, CtxI) && GEP->getType()->isPointerTy()
+          && V == GEP->getPointerOperand() && isGEPFlatKnownNonNull(GEP, DL)) {
+        for (auto *UGEP : GEP->users()) {
+          if (U == getLoadStorePointerOperand(UGEP)) {
+            const Instruction *IGEP = cast<Instruction>(UGEP);
+            if (!NullPointerIsDefined(IGEP->getFunction(),
+                                      U->getType()->getPointerAddressSpace()) &&
+                DT->dominates(IGEP, CtxI)) {
+              return true;
+            }
+          }
+        }
+      }
     }
 
     // Consider only compare instructions uniquely controlling a branch
@@ -2333,7 +2395,7 @@ bool isKnownNonZero(const Value *V, const APInt &DemandedElts, unsigned Depth,
     }
   }
 
-  if (isKnownNonNullFromDominatingCondition(V, Q.CxtI, Q.DT))
+  if (isKnownNonNullFromDominatingCondition(V, Q.CxtI, Q.DT, Q.DL))
     return true;
 
   // Check for recursive pointer simplifications.

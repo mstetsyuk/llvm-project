@@ -1,0 +1,154 @@
+diff --git a/llvm/lib/Analysis/ValueTracking.cpp b/llvm/lib/Analysis/ValueTracking.cpp
+--- a/llvm/lib/Analysis/ValueTracking.cpp
++++ b/llvm/lib/Analysis/ValueTracking.cpp
+@@ -38,6 +38,7 @@
+ #include "llvm/IR/Constant.h"
+ #include "llvm/IR/ConstantRange.h"
+ #include "llvm/IR/Constants.h"
++#include "llvm/IR/DataLayout.h"
+ #include "llvm/IR/DerivedTypes.h"
+ #include "llvm/IR/DiagnosticInfo.h"
+ #include "llvm/IR/Dominators.h"
+@@ -2099,9 +2100,53 @@ static bool isGEPKnownNonNull(const GEPO
+   return false;
+ }
+
++static bool isGEPFlatKnownNonNull(const GEPOperator *GEP, const DataLayout &DL) {
++  const Function *F = nullptr;
++  if (const Instruction *I = dyn_cast<Instruction>(GEP))
++    F = I->getFunction();
++
++  if (!GEP->isInBounds() ||
++      NullPointerIsDefined(F, GEP->getPointerAddressSpace()))
++    return false;
++
++  // FIXME: Support vector-GEPs.
++  assert(GEP->getType()->isPointerTy() && "We only support plain pointer GEP");
++
++  // Walk the GEP operands and see if any operand introduces a non-zero offset.
++  // If so, then the GEP cannot produce a null pointer, as doing so would
++  // inherently violate the inbounds contract within address space zero.
++  for (gep_type_iterator GTI = gep_type_begin(GEP), GTE = gep_type_end(GEP);
++       GTI != GTE; ++GTI) {
++    // Struct types are easy -- they must always be indexed by a constant.
++    if (StructType *STy = GTI.getStructTypeOrNull()) {
++      ConstantInt *OpC = cast<ConstantInt>(GTI.getOperand());
++      unsigned ElementIdx = OpC->getZExtValue();
++      const StructLayout *SL = DL.getStructLayout(STy);
++      uint64_t ElementOffset = SL->getElementOffset(ElementIdx);
++      if (ElementOffset > 0)
++        return true;
++      continue;
++    }
++
++    // If we have a zero-sized type, the index doesn't matter. Keep looping.
++    if (DL.getTypeAllocSize(GTI.getIndexedType()).getKnownMinSize() == 0)
++      continue;
++
++    // Fast path the constant operand case both for efficiency and so we don't.
++    if (ConstantInt *OpC = dyn_cast<ConstantInt>(GTI.getOperand())) {
++      if (!OpC->isZero())
++        return true;
++      continue;
++    }
++  }
++
++  return false;
++}
++
+ static bool isKnownNonNullFromDominatingCondition(const Value *V,
+                                                   const Instruction *CtxI,
+-                                                  const DominatorTree *DT) {
++                                                  const DominatorTree *DT,
++                                                  const DataLayout &DL) {
+   if (isa<Constant>(V))
+     return false;
+
+@@ -2134,6 +2179,23 @@ static bool isKnownNonNullFromDominating
+         return true;
+     }
+
++    if (const GEPOperator *GEP = dyn_cast<GEPOperator>(U)) {
++      const Instruction *I = cast<Instruction>(U);
++      if (DT->dominates(I, CtxI) && GEP->getType()->isPointerTy()
++          && V == GEP->getPointerOperand() && isGEPFlatKnownNonNull(GEP, DL)) {
++        for (auto *UGEP : GEP->users()) {
++          if (U == getLoadStorePointerOperand(UGEP)) {
++            const Instruction *IGEP = cast<Instruction>(UGEP);
++            if (!NullPointerIsDefined(IGEP->getFunction(),
++                                      U->getType()->getPointerAddressSpace()) &&
++                DT->dominates(IGEP, CtxI)) {
++              return true;
++            }
++          }
++        }
++      }
++    }
++
+     // Consider only compare instructions uniquely controlling a branch
+     Value *RHS;
+     CmpInst::Predicate Pred;
+@@ -2311,7 +2373,7 @@ bool isKnownNonZero(const Value *V, cons
+     }
+   }
+
+-  if (isKnownNonNullFromDominatingCondition(V, Q.CxtI, Q.DT))
++  if (isKnownNonNullFromDominatingCondition(V, Q.CxtI, Q.DT, Q.DL))
+     return true;
+
+   // Check for recursive pointer simplifications.
+diff --git a/llvm/test/Transforms/InstCombine/select-cmp-br.ll b/llvm/test/Transforms/InstCombine/select-cmp-br.ll
+--- a/llvm/test/Transforms/InstCombine/select-cmp-br.ll
++++ b/llvm/test/Transforms/InstCombine/select-cmp-br.ll
+@@ -15,21 +15,19 @@ define void @test1(%C* %arg) {
+ ; CHECK-NEXT:    [[TMP:%.*]] = getelementptr inbounds [[C:%.*]], %C* [[ARG:%.*]], i64 0, i32 0, i32 0
+ ; CHECK-NEXT:    [[M:%.*]] = load i64*, i64** [[TMP]], align 8
+ ; CHECK-NEXT:    [[TMP1:%.*]] = getelementptr inbounds [[C]], %C* [[ARG]], i64 1, i32 0, i32 0
+ ; CHECK-NEXT:    [[N:%.*]] = load i64*, i64** [[TMP1]], align 8
+-; CHECK-NEXT:    [[TMP5:%.*]] = icmp ne i64* [[M]], [[N]]
+-; CHECK-NEXT:    [[TMP71:%.*]] = icmp eq %C* [[ARG]], null
+-; CHECK-NEXT:    [[TMP7:%.*]] = or i1 [[TMP5]], [[TMP71]]
+-; CHECK-NEXT:    br i1 [[TMP7]], label [[BB10:%.*]], label [[BB8:%.*]]
++; CHECK-NEXT:    [[TMP5_NOT:%.*]] = icmp eq i64* [[M]], [[N]]
++; CHECK-NEXT:    br i1 [[TMP5_NOT]], label [[BB8:%.*]], label [[BB10:%.*]]
+ ; CHECK:       bb:
+ ; CHECK-NEXT:    ret void
+ ; CHECK:       bb8:
+ ; CHECK-NEXT:    [[TMP9:%.*]] = getelementptr inbounds [[C]], %C* [[ARG]], i64 0, i32 0
+-; CHECK-NEXT:    tail call void @bar(%struct.S* [[TMP9]])
++; CHECK-NEXT:    tail call void @bar(%struct.S* nonnull [[TMP9]])
+ ; CHECK-NEXT:    br label [[BB:%.*]]
+ ; CHECK:       bb10:
+ ; CHECK-NEXT:    [[TMP2:%.*]] = getelementptr inbounds i64, i64* [[M]], i64 9
+ ; CHECK-NEXT:    [[TMP3:%.*]] = bitcast i64* [[TMP2]] to i64 (%C*)**
+ ; CHECK-NEXT:    [[TMP4:%.*]] = load i64 (%C*)*, i64 (%C*)** [[TMP3]], align 8
+-; CHECK-NEXT:    [[TMP11:%.*]] = tail call i64 [[TMP4]](%C* [[ARG]])
++; CHECK-NEXT:    [[TMP11:%.*]] = tail call i64 [[TMP4]](%C* nonnull [[ARG]])
+ ; CHECK-NEXT:    br label [[BB]]
+ ;
+entry:
+  %tmp = getelementptr inbounds %C, %C* %arg, i64 0, i32 0, i32 0
+  %m = load i64*, i64** %tmp, align 8
+  %tmp1 = getelementptr inbounds %C, %C* %arg, i64 1, i32 0, i32 0
+  %n = load i64*, i64** %tmp1, align 8
+  %tmp2 = getelementptr inbounds i64, i64* %m, i64 9
+  %tmp3 = bitcast i64* %tmp2 to i64 (%C*)**
+  %tmp4 = load i64 (%C*)*, i64 (%C*)** %tmp3, align 8
+  %tmp5 = icmp eq i64* %m, %n
+  %tmp6 = select i1 %tmp5, %C* %arg, %C* null
+  %tmp7 = icmp eq %C* %tmp6, null
+  br i1 %tmp7, label %bb10, label %bb8
+
+bb:                                               ; preds = %bb10, %bb8
+  ret void
+
+bb8:                                              ; preds = %entry
+  %tmp9 = getelementptr inbounds %C, %C* %tmp6, i64 0, i32 0
+  tail call void @bar(%struct.S* %tmp9)
+  br label %bb
+
+bb10:                                             ; preds = %entry
+  %tmp11 = tail call i64 %tmp4(%C* %arg)
+  br label %bb
+}
+
