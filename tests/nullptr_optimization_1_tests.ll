@@ -101,4 +101,16 @@ return:
   ret i32* %retval.0
 }
 
-
+; Make sure that different address spaces does not affect pointer check
+define i32 @caller5(i32 addrspace(1)* %0) {
+; CHECK-LABEL: @caller5(
+; CHECK-NEXT:    [[TMP1:%.*]] = getelementptr i32, i32 addrspace(1)* [[TMP0:%.*]], i32 0
+; CHECK-NEXT:    [[TMP2:%.*]] = icmp eq i32 addrspace(1)* [[TMP0]], null
+; CHECK-NEXT:    [[TMP3:%.*]] = select i1 [[TMP2]], i32 1, i32 2
+; CHECK-NEXT:    ret i32 [[TMP3]]
+;
+  %1 = getelementptr i32, i32 addrspace(1)* %0, i32 0
+  %2 = icmp eq i32 addrspace(1)* %0, null
+  %3 = select i1 %2, i32 1, i32 2
+  ret i32 %3
+}
